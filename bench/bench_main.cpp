@@ -2,6 +2,7 @@
 #include "registry.h"
 
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -144,18 +145,40 @@ void print_result(const BenchResult& r) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cout << "Usage: compressup_bench <file1> [file2 ...]\n";
+        std::cout << "Usage: compressup_bench [--csv <csv_file>] <file1> [file2 ...]\n";
+        return 1;
+    }
+
+    std::string csv_path;
+    int arg_index = 1;
+    if (arg_index + 2 <= argc && std::string(argv[arg_index]) == "--csv") {
+        csv_path = argv[arg_index + 1];
+        arg_index += 2;
+    }
+
+    if (arg_index >= argc) {
+        std::cout << "Usage: compressup_bench [--csv <csv_file>] <file1> [file2 ...]\n";
         return 1;
     }
 
     std::vector<std::string> files;
-    for (int i = 1; i < argc; ++i) {
+    for (int i = arg_index; i < argc; ++i) {
         files.emplace_back(argv[i]);
     }
 
     std::vector<std::string> algorithms = available_algorithms();
 
     const int repeats = 5;
+
+    std::ofstream csv;
+    if (!csv_path.empty()) {
+        csv.open(csv_path, std::ios::out | std::ios::trunc);
+        if (!csv) {
+            std::cerr << "Failed to open CSV file: " << csv_path << "\n";
+            return 1;
+        }
+        csv << "algorithm,file,orig_bytes,comp_bytes,ratio,compress_ms,decompress_ms,compress_mb_s,decompress_mb_s\n";
+    }
 
     print_header();
 
@@ -164,6 +187,17 @@ int main(int argc, char** argv) {
             try {
                 BenchResult r = run_bench(algo, file, repeats);
                 print_result(r);
+                if (csv.is_open()) {
+                    csv << r.algorithm << ","
+                        << r.file << ","
+                        << r.original_size << ","
+                        << r.compressed_size << ","
+                        << r.ratio << ","
+                        << r.compress_ms << ","
+                        << r.decompress_ms << ","
+                        << r.compress_mb_s << ","
+                        << r.decompress_mb_s << "\n";
+                }
             } catch (const std::exception& ex) {
                 std::cerr << "Error while benchmarking algo=" << algo
                           << " file=" << file << ": " << ex.what() << "\n";
