@@ -4,13 +4,14 @@
 
 - **平台与语言**：Linux / Ubuntu，使用 **C++20** 与 CMake 构建。
 - **功能目标**：
-  - 针对文本文件提供压缩与解压功能。
+  - 针对文本和二进制文件提供压缩与解压功能。
   - 支持多种压缩算法，方便横向对比压缩率与性能。
+  - 支持多线程并行压缩，充分利用多核CPU。
+  - 提供高级IO支持（内存映射、异步IO）。
 - **非功能目标**：
   - 架构简单、易读、易扩展（KISS 原则）。
   - 多算法可插拔，新增算法改动最小。
-  - 提供自动化测试与基准测试工具，生成可阅读的“测试报告”。
-
+  - 提供自动化测试与基准测试工具，生成可阅读的"测试报告"。
 
 ## 2. 总体架构
 
@@ -20,24 +21,48 @@
 
 - `CMakeLists.txt`：CMake 构建脚本。
 - `src/`
-  - `types.h`：通用类型别名（例如 `using Byte = std::uint8_t;`）。
-  - `compressor.h`：压缩算法抽象接口 `ICompressor`。
-  - `rle_compressor.{h,cpp}`：RLE（Run-Length Encoding）算法实现。
-  - `lz77_compressor.{h,cpp}`：简化 LZ77 算法实现。
-  - `registry.{h,cpp}`：算法注册与工厂，支持按名称或 ID 创建压缩器。
-  - `file_io.{h,cpp}`：文件读写工具（文本/二进制）。
-  - `container.{h,cpp}`：压缩文件容器格式（魔数 + 算法 ID + 原始长度 + 压缩数据）。
-  - `api.{h,cpp}`：高层 API，封装文件压缩/解压逻辑。
-  - `main.cpp`：命令行工具入口 `compressup_cli`。
+  - **基础设施**
+    - `types.h`：通用类型别名、压缩级别、算法类别、统计信息等。
+    - `compressor.h`：压缩算法抽象接口 `ICompressor`。
+    - `registry.{h,cpp}`：算法注册与工厂，支持按名称或 ID 创建压缩器。
+    - `file_io.{h,cpp}`：文件读写工具（文本/二进制）。
+    - `container.{h,cpp}`：压缩文件容器格式。
+    - `api.{h,cpp}`：高层 API，封装文件压缩/解压逻辑。
+    - `main.cpp`：命令行工具入口 `compressup_cli`。
+  - **压缩算法（熵编码）**
+    - `huffman_compressor.{h,cpp}`：Huffman编码实现。
+  - **压缩算法（字典压缩）**
+    - `rle_compressor.{h,cpp}`：RLE 算法实现。
+    - `lz77_compressor.{h,cpp}`：LZ77 算法实现。
+    - `lzw_compressor.{h,cpp}`：LZW 算法实现。
+    - `lzss_compressor.{h,cpp}`：LZSS 算法实现。
+  - **压缩算法（变换）**
+    - `delta_compressor.{h,cpp}`：Delta 编码实现。
+    - `bwt_compressor.{h,cpp}`：BWT+MTF 变换实现。
+  - **并行与IO**
+    - `parallel_compressor.{h,cpp}`：多线程并行压缩框架。
+    - `advanced_io.{h,cpp}`：高级IO（mmap、异步IO）。
 - `tests/`
-  - `test_main.cpp`：最小自定义测试程序，验证各算法正确性。
+  - `test_main.cpp`：综合测试程序，验证各算法正确性。
 - `bench/`
-  - `bench_main.cpp`：基准测试程序，测量压缩率与性能。
+  - `bench_main.cpp`：基础基准测试程序。
+  - `advanced_bench.cpp`：高级基准测试程序。
 - `doc/`
   - `design.md`：本设计文档。
 - `changelog/`
   - 若干 `*.md`：记录每次重要改动。
 
+### 2.2 算法分类
+
+| 类别 | 算法 | 特点 |
+|------|------|------|
+| 熵编码 | Huffman | 基于字符频率的最优前缀编码 |
+| 字典压缩 | RLE | 游程编码，适合高重复数据 |
+| 字典压缩 | LZ77 | 滑动窗口，引用历史匹配 |
+| 字典压缩 | LZW | 动态字典，无需传输字典 |
+| 字典压缩 | LZSS | LZ77优化，标志位区分 |
+| 变换 | Delta | 差分编码，适合平滑数据 |
+| 变换 | BWT+MTF | 块排序变换+移动到前编码 |
 
 ## 3. 压缩算法接口与实现
 
@@ -345,3 +370,176 @@ cd build
 ```
 
 将输出表格直接贴入 Markdown 报告，即可方便地展示不同压缩算法在不同数据集上的压缩率与性能表现。
+
+
+## 10. 新增算法详解
+
+### 10.1 Huffman编码
+
+**原理**：基于字符出现频率构建最优二叉树，高频字符分配短编码。
+
+**实现要点**：
+- 使用优先队列构建Huffman树
+- 序列化树结构以便解压时重建
+- 位流打包/解包处理
+
+**适用场景**：一般文本压缩，作为其他压缩算法的后端。
+
+### 10.2 LZW算法
+
+**原理**：动态构建字典，将重复出现的字符串映射为固定位数编码。
+
+**实现要点**：
+- 初始字典包含所有单字符（256项）
+- 12位编码，最大4096个字典项
+- 特殊情况 cScSc 处理
+
+**适用场景**：GIF图像压缩的基础算法。
+
+### 10.3 LZSS算法
+
+**原理**：LZ77的改进版本，使用标志位区分字面量和匹配引用。
+
+**实现要点**：
+- 滑动窗口4096字节
+- 最小匹配长度3字节
+- 标志字节 + 数据分离存储
+
+**适用场景**：比LZ77更高效，适合一般数据压缩。
+
+### 10.4 Delta编码
+
+**原理**：存储相邻字节之间的差值，适合数值变化平滑的数据。
+
+**实现要点**：
+- 第一个字节直接存储
+- 后续存储与前一字节的差值
+- 利用溢出特性保持无损
+
+**适用场景**：音频数据、图像数据预处理。
+
+### 10.5 BWT+MTF
+
+**原理**：
+1. BWT (Burrows-Wheeler Transform)：重排字符使相同字符聚集
+2. MTF (Move-to-Front)：将最近使用的字符编码为小数值
+
+**实现要点**：
+- 块大小限制100KB以控制内存使用
+- 后缀数组排序构建BWT
+- MTF使用线性查找（简单实现）
+
+**适用场景**：作为熵编码的预处理，如bzip2。
+
+
+## 11. 多线程并行压缩
+
+### 11.1 设计目标
+
+- 充分利用多核CPU提升压缩/解压速度
+- 保持与单线程相同的压缩结果（可验证）
+- 支持大文件分块处理
+
+### 11.2 实现架构
+
+```
+┌─────────────────────────────────────────┐
+│           ParallelCompressor            │
+├─────────────────────────────────────────┤
+│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐       │
+│  │Block│ │Block│ │Block│ │Block│ ...   │
+│  │  1  │ │  2  │ │  3  │ │  4  │       │
+│  └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘       │
+│     │       │       │       │           │
+│     ▼       ▼       ▼       ▼           │
+│  ┌─────────────────────────────────┐   │
+│  │         ThreadPool              │   │
+│  │  ┌────┐ ┌────┐ ┌────┐ ┌────┐   │   │
+│  │  │ T1 │ │ T2 │ │ T3 │ │ T4 │   │   │
+│  │  └────┘ └────┘ └────┘ └────┘   │   │
+│  └─────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+```
+
+### 11.3 使用方式
+
+```cpp
+// 使用ParallelCompressor包装任意算法
+auto base = create_compressor("lz77");
+ParallelCompressor parallel(std::move(base), 
+                            64 * 1024,  // 块大小
+                            4);         // 线程数
+
+auto compressed = parallel.compress(input);
+auto decompressed = parallel.decompress(compressed);
+```
+
+
+## 12. 高级IO系统
+
+### 12.1 内存映射 (MappedFile)
+
+```cpp
+MappedFile file("/path/to/large/file.txt");
+auto view = file.as_string_view();  // 零拷贝访问
+```
+
+### 12.2 缓冲写入 (BufferedWriter)
+
+```cpp
+BufferedWriter writer("/path/to/output.bin", 64 * 1024);
+writer.write(data);
+writer.flush();
+```
+
+### 12.3 异步IO (AsyncIO)
+
+```cpp
+auto future = AsyncIO::compress_file_async("/path/to/file.txt", "lz77");
+// 执行其他操作...
+auto compressed = future.get();  // 获取结果
+```
+
+
+## 13. 高级Benchmark
+
+### 13.1 运行方式
+
+```bash
+# 基础benchmark
+./compressup_bench file1.txt file2.txt
+
+# 高级benchmark（带详细统计）
+./compressup_advanced_bench --size 1000 --runs 20 --json results.json
+```
+
+### 13.2 测试数据类型
+
+| 类型 | 描述 | 压缩难度 |
+|------|------|----------|
+| text | 模拟英文文本 | 中等 |
+| repetitive | 高重复模式 | 容易 |
+| binary | 有规律的二进制 | 中等 |
+| sparse | 稀疏数据（大量零） | 容易 |
+| random | 纯随机数据 | 困难 |
+
+### 13.3 输出格式
+
+支持表格输出和JSON导出，方便后续分析和可视化。
+
+
+## 14. 未来扩展方向
+
+### 14.1 计划中的算法
+
+- **Arithmetic Coding**：比Huffman更接近熵极限
+- **Deflate**：LZ77 + Huffman组合
+- **LZ4**：超快速压缩算法
+- **Zstandard**：现代高压缩比算法
+
+### 14.2 计划中的功能
+
+- **流式压缩**：支持无限长度输入
+- **压缩级别**：可调节压缩率/速度平衡
+- **校验和**：数据完整性验证
+- **外部库集成**：zlib、lz4、zstd等
