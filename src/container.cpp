@@ -9,6 +9,27 @@ namespace {
 constexpr Byte kMagic = static_cast<Byte>(0xC3);
 constexpr std::size_t kHeaderSize = 1 + 1 + 8;
 
+AlgorithmId to_algorithm_id(Byte value) {
+    switch (static_cast<AlgorithmId>(value)) {
+    case AlgorithmId::Rle:
+        return AlgorithmId::Rle;
+    case AlgorithmId::Lz77:
+        return AlgorithmId::Lz77;
+    case AlgorithmId::Huffman:
+        return AlgorithmId::Huffman;
+    case AlgorithmId::Lzw:
+        return AlgorithmId::Lzw;
+    case AlgorithmId::Lzss:
+        return AlgorithmId::Lzss;
+    case AlgorithmId::Delta:
+        return AlgorithmId::Delta;
+    case AlgorithmId::Bwt:
+        return AlgorithmId::Bwt;
+    }
+
+    throw std::runtime_error("Unknown algorithm id in container");
+}
+
 }
 
 std::vector<Byte> pack_container(AlgorithmId algorithm,
@@ -40,17 +61,7 @@ UnpackedContainer unpack_container(const std::vector<Byte>& data) {
     }
 
     Byte algo_byte = data[1];
-    AlgorithmId algorithm;
-    switch (algo_byte) {
-    case static_cast<Byte>(AlgorithmId::Rle):
-        algorithm = AlgorithmId::Rle;
-        break;
-    case static_cast<Byte>(AlgorithmId::Lz77):
-        algorithm = AlgorithmId::Lz77;
-        break;
-    default:
-        throw std::runtime_error("Unknown algorithm id in container");
-    }
+    AlgorithmId algorithm = to_algorithm_id(algo_byte);
 
     std::uint64_t original_size = 0;
     for (int i = 0; i < 8; ++i) {

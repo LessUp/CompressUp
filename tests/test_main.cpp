@@ -1,8 +1,12 @@
+#include "api.h"
 #include "compressor.h"
-#include "registry.h"
+#include "container.h"
+#include "file_io.h"
 #include "parallel_compressor.h"
+#include "registry.h"
 
 #include <iostream>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -114,6 +118,76 @@ void test_parallel_compressor() {
     }
 }
 
+void test_container_support() {
+    std::cout << "\n=== Container Format Test ===\n";
+
+    const std::vector<Byte> payload = {1, 2, 3, 4, 5};
+    const std::uint64_t original_size = 12345;
+
+    for (const auto& info : available_algorithm_infos()) {
+        try {
+            auto packed = pack_container(info.id, original_size, payload);
+            auto unpacked = unpack_container(packed);
+
+            if (unpacked.algorithm == info.id &&
+                unpacked.original_size == original_size &&
+                unpacked.payload == payload) {
+                std::cout << "  [PASS] container_" << info.name << "\n";
+                ++g_passed;
+            } else {
+                std::cout << "  [FAIL] container_" << info.name << "\n";
+                ++g_failed;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "  [ERROR] container_" << info.name << ": " << e.what() << "\n";
+            ++g_failed;
+        }
+    }
+}
+
+void test_api_file_roundtrip() {
+    std::cout << "\n=== API File Roundtrip Test ===\n";
+
+    const std::string base_content = "CompressUp API roundtrip" +
+        generate_random_string(256, 99);
+
+    auto temp_dir = std::filesystem::temp_directory_path() / "compressup_tests";
+    std::filesystem::create_directories(temp_dir);
+
+    for (const auto& algo : available_algorithms()) {
+        auto input_path = temp_dir / ("input_" + algo + ".txt");
+        auto archive_path = temp_dir / ("archive_" + algo + ".cup");
+        auto output_path = temp_dir / ("output_" + algo + ".txt");
+
+        std::error_code ec;
+        std::filesystem::remove(input_path, ec);
+        std::filesystem::remove(archive_path, ec);
+        std::filesystem::remove(output_path, ec);
+
+        try {
+            write_text_file(input_path.string(), base_content);
+            compress_file(input_path.string(), archive_path.string(), algo);
+            decompress_file(archive_path.string(), output_path.string());
+
+            auto restored = read_text_file(output_path.string());
+            if (restored == base_content) {
+                std::cout << "  [PASS] api_" << algo << "\n";
+                ++g_passed;
+            } else {
+                std::cout << "  [FAIL] api_" << algo << "\n";
+                ++g_failed;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "  [ERROR] api_" << algo << ": " << e.what() << "\n";
+            ++g_failed;
+        }
+
+        std::filesystem::remove(input_path, ec);
+        std::filesystem::remove(archive_path, ec);
+        std::filesystem::remove(output_path, ec);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -174,9 +248,13 @@ int main() {
 
     // 算法信息测试
     test_algorithm_info();
-    
+
     // 并行压缩测试
     test_parallel_compressor();
+
+    // 容器格式与API文件往返测试
+    test_container_support();
+    test_api_file_roundtrip();
 
     // 总结
     std::cout << "\n=== Summary ===\n";
