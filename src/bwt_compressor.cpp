@@ -24,8 +24,8 @@ std::pair<std::string, std::size_t> BwtCompressor::bwt_transform(std::string_vie
     // 按循环移位后的字符串排序
     std::sort(indices.begin(), indices.end(), [&input, n](std::size_t a, std::size_t b) {
         for (std::size_t i = 0; i < n; ++i) {
-            char ca = input[(a + i) % n];
-            char cb = input[(b + i) % n];
+            unsigned char ca = static_cast<unsigned char>(input[(a + i) % n]);
+            unsigned char cb = static_cast<unsigned char>(input[(b + i) % n]);
             if (ca != cb) {
                 return ca < cb;
             }
